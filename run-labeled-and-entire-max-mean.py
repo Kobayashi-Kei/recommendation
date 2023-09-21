@@ -27,8 +27,9 @@ def main():
     """
     引数を読み込み
     """
-    args = arg_parse_from_commandline(['method'])
+    args = arg_parse_from_commandline(['method', 'meanOrMax'])
     method = args.method
+    meanOrMax = args.meanOrMax
 
     if method != 'tf-idf' and \
             method != 'bow' and \
@@ -36,6 +37,12 @@ def main():
             method != 'SciBert' and \
             method != 'Specter':
         print("Methodの引数が間違っています")
+        exit()
+
+    if meanOrMax != "mean" and \
+        meanOrMax != "max" and \
+        meanOrMax != "mean-max":
+        print("第二引数 meanOrMax は 'mean' or 'max' or 'mean-max' で指定してください．")
         exit()
 
     """
@@ -121,18 +128,18 @@ def main():
     if method == 'tf-idf': 
         vectorizer = TfidfVectorizer()
         simMatrixDict = calcSimMatrixForLaveled(allPaperData, testPaperData, labelList, vectorizer=vectorizer)
-        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList)                
+        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList, meanOrMax)                
             
     # BOW
     elif method == 'bow':
         vectorizer = CountVectorizer()
         simMatrixDict = calcSimMatrixForLaveled(allPaperData, testPaperData, labelList, vectorizer=vectorizer)
-        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList)
+        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList, meanOrMax)
 
     # BERT系
     elif 'Bert' in method or 'Specter' in method:
         simMatrixDict = calcSimMatrixForLaveled(allPaperData, testPaperData, labelList)
-        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList)
+        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList, meanOrMax)
 
     """
     デバッグ出力
@@ -200,6 +207,7 @@ def main():
     print("------- 実行条件 ------")
     print("プログラム: ", __file__.split('/')[-1])
     print("埋め込み: ",size)    
+    print("手法: ", meanOrMax)
 
     # データセット情報の出力
     print('------- データセット情報 -----')
@@ -284,55 +292,133 @@ def calcSimMatrixForLaveled(allPaperData: allPaperDataClass, testPaperData: test
 
     return simMatrixDict       
 
-def calcMergeSimMatrix(simMatrixDict, labelList):
-    ### 平均
-    # simMatrixDictのラベルごとの各要素で平均を取る
-    meanMergeSimMatrix = np.zeros((len(simMatrixDict[labelList[0]]),len(simMatrixDict[labelList[0]][0])))
-    
-    # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
-    notNanSimMatrixDict = {} 
-    for key in simMatrixDict:
-        notNanSimMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, 1)
 
-    # nanでない要素数の合計をもとめる
-    notNanSam = sum([notNanSimMatrixDict[key] for key in notNanSimMatrixDict])
-
-    # 正規化
-    for key in simMatrixDict:
-        simMatrixDict[key] = preprocessing.scale(simMatrixDict[key], axis=1)
-
-    # ndarrayの加算の都合上、simMatrixのnanを0に変換する
-    for key in simMatrixDict:
-        simMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, simMatrixDict[key])
-    
-    # 全てのsimMatrixの要素の平均を出す
-    meanMergeSimMatrix = sum([simMatrixDict[key]
-                             for key in simMatrixDict]) / notNanSam
-    
-    ###  最大
-    # simMatrixDictのラベルごとの各要素で平均を取る
-    maxMergeSimMatrix = np.zeros(
+def calcMergeSimMatrix(simMatrixDict, labelList, meanOrMax):
+    numMatrix = np.zeros(
         (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
+    numCount = 0
+    
+    ### 各観点の類似度の標準化（アブスト全体も含む）
+    for key in simMatrixDict:
+        simMatrixDict[key] = preprocessing.scale(simMatrixDict[key], axis=1)
+
+    ### アブスト全体を取り出す
+    entireSimMatrix = simMatrixDict["entire"]
+    numMatrix += entireSimMatrix
+    del simMatrixDict["entire"]
+
+    ### 平均
+    if "mean" in meanOrMax:
+        # simMatrixDictのラベルごとの各要素で平均を取る
+        meanMergeSimMatrix = np.zeros(
+            (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
+
+        # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
+        notNanSimMatrixDict = {}
+        for key in simMatrixDict:
+            notNanSimMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, 1)
+
+        # nanでない要素数の合計をもとめる
+        notNanSam = sum([notNanSimMatrixDict[key] for key in notNanSimMatrixDict])
+
+        # ndarrayの加算の都合上、simMatrixのnanを0に変換する
+        for key in simMatrixDict:
+            simMatrixDict[key] = np.where(
+                np.isnan(simMatrixDict[key]), 0, simMatrixDict[key])
+
+        # 全てのsimMatrixの要素の平均を出す
+        meanMergeSimMatrix = sum([simMatrixDict[key]
+                                for key in simMatrixDict]) / notNanSam
+        
+        numMatrix += meanMergeSimMatrix
+        numCount += 1
+
+    ### 最大
+    if "max" in meanOrMax:
+        # simMatrixDictのラベルごとの各要素で平均を取る
+        maxMergeSimMatrix = np.zeros(
+            (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
+
+        # 最大値を求める
+        for key in simMatrixDict:
+            maxMergeSimMatrix = np.fmax(maxMergeSimMatrix, simMatrixDict[key])
+
+        numMatrix += maxMergeSimMatrix
+        numCount += 1
+
+    ### アブスト全体と観点の平均・最大との平均を取る
+    return numMatrix / numCount
+
+
+
+def calcMergeSimMatrix_miss(simMatrixDict, labelList, meanOrMax):
+    """観点の平均値，最大値の計算にアブスト全体も含めて実装してしまった時の関数（実装ミス）
+    もしかするとこっちの方がスコアが高いかもしれないから残しておく
+    （原因）
+    simMatrixDictにアブスト全体（"entire"）も含めていた
+    
+    Args:
+        simMatrixDict (_type_): _description_
+        labelList (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    numMatrix = np.zeros(
+        (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
+    numCount = 0
 
     # 正規化
     for key in simMatrixDict:
         simMatrixDict[key] = preprocessing.scale(simMatrixDict[key], axis=1)
 
-    # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
-    for key in simMatrixDict:
-        maxMergeSimMatrix = np.fmax(maxMergeSimMatrix, simMatrixDict[key])
-    
-    
-    ### アブスト全体
+    # 平均
+    if "mean" in meanOrMax:
+        # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
+        notNanSimMatrixDict = {}
+        for key in simMatrixDict:
+            notNanSimMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, 1)
+
+        # nanでない要素数の合計をもとめる
+        notNanSam = sum([notNanSimMatrixDict[key] for key in notNanSimMatrixDict])
+
+        # ndarrayの加算の都合上、simMatrixのnanを0に変換する
+        for key in simMatrixDict:
+            simMatrixDict[key] = np.where(
+                np.isnan(simMatrixDict[key]), 0, simMatrixDict[key])
+
+        # 全てのsimMatrixの要素の平均を出す
+        meanMergeSimMatrix = sum([simMatrixDict[key]
+                                for key in simMatrixDict]) / notNanSam
+        
+        numMatrix += meanMergeSimMatrix
+        numCount += 1
+
+    # 最大
+    if "max" in meanOrMax:
+        # simMatrixDictのラベルごとの各要素で平均を取る
+        maxMergeSimMatrix = np.zeros(
+            (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
+
+        # 正規化
+        for key in simMatrixDict:
+            simMatrixDict[key] = preprocessing.scale(simMatrixDict[key], axis=1)
+
+        # 最大
+        for key in simMatrixDict:
+            maxMergeSimMatrix = np.fmax(maxMergeSimMatrix, simMatrixDict[key])
+
+        numMatrix += maxMergeSimMatrix
+        numCount += 1
+
+    # アブスト全体
     entireSimMatrix = simMatrixDict["entire"]
     del simMatrixDict["entire"]
-    
+    numMatrix += entireSimMatrix
+    numCount += 1
 
-    ### アブスト全体との平均を取る
-    meanMergeSimMatrix = (((meanMergeSimMatrix + maxMergeSimMatrix) / 2) + entireSimMatrix) / 2
-    # meanMergeSimMatrix = ( meanMergeSimMatrix + maxMergeSimMatrix + entireSimMatrix ) / 3
-    
-    return meanMergeSimMatrix
+    # アブスト全体と観点の最大との平均を取る
+    return numMatrix / numCount
 
 if __name__ == "__main__":
     main()
