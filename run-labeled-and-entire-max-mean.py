@@ -52,7 +52,7 @@ def main():
     # size = "large"
     # size = "medium-tf-idf-title_margin2"
     # size = "medium-tf-idf-title_margin2_oneModel"
-    size = "medium-paper_margin2"
+    # size = "medium-paper_margin2"
 
     
 
@@ -285,8 +285,9 @@ def calcSimMatrixForLaveled(allPaperData: allPaperDataClass, testPaperData: test
     return simMatrixDict       
 
 def calcMergeSimMatrix(simMatrixDict, labelList):
+    ### 平均
     # simMatrixDictのラベルごとの各要素で平均を取る
-    mergeSimMatrix = np.zeros((len(simMatrixDict[labelList[0]]),len(simMatrixDict[labelList[0]][0])))
+    meanMergeSimMatrix = np.zeros((len(simMatrixDict[labelList[0]]),len(simMatrixDict[labelList[0]][0])))
     
     # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
     notNanSimMatrixDict = {} 
@@ -304,17 +305,34 @@ def calcMergeSimMatrix(simMatrixDict, labelList):
     for key in simMatrixDict:
         simMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, simMatrixDict[key])
     
-    # アブスト全体だけ取り出す
+    # 全てのsimMatrixの要素の平均を出す
+    meanMergeSimMatrix = sum([simMatrixDict[key]
+                             for key in simMatrixDict]) / notNanSam
+    
+    ###  最大
+    # simMatrixDictのラベルごとの各要素で平均を取る
+    maxMergeSimMatrix = np.zeros(
+        (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
+
+    # 正規化
+    for key in simMatrixDict:
+        simMatrixDict[key] = preprocessing.scale(simMatrixDict[key], axis=1)
+
+    # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
+    for key in simMatrixDict:
+        maxMergeSimMatrix = np.fmax(maxMergeSimMatrix, simMatrixDict[key])
+    
+    
+    ### アブスト全体
     entireSimMatrix = simMatrixDict["entire"]
     del simMatrixDict["entire"]
     
-    # 全てのsimMatrixの要素の平均を出す
-    mergeSimMatrix = sum([simMatrixDict[key] for key in simMatrixDict]) / notNanSam
+
+    ### アブスト全体との平均を取る
+    meanMergeSimMatrix = (((meanMergeSimMatrix + maxMergeSimMatrix) / 2) + entireSimMatrix) / 2
+    # meanMergeSimMatrix = ( meanMergeSimMatrix + maxMergeSimMatrix + entireSimMatrix ) / 3
     
-    # 全体との平均を取る
-    mergeSimMatrix = (mergeSimMatrix + entireSimMatrix) / 2
-    
-    return mergeSimMatrix
+    return meanMergeSimMatrix
 
 if __name__ == "__main__":
     main()

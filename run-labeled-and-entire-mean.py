@@ -11,11 +11,12 @@ from recom import allPaperDataClass, testPaperDataClass
 from recom import extractTestPaperEmbeddings, genQrels, genRun
 import numpy as np
 import datetime
+from sklearn.metrics.pairwise import euclidean_distances
 from sklearn import preprocessing
 
 """
 関連研究推薦の実験
-・分類されたアブストラクトの各観点同士で類似度の算出を行い、その最大をとる
+・分類されたアブストラクトの各観点同士で類似度の算出を行い、その和をとる
 
 ※ 観点毎の類似度を正規化している
   正規化していないプログラムはnotStandarzationディレクトリにある。
@@ -48,10 +49,12 @@ def main():
     """
     size = "medium"
     # size = "small"
-    # size = "medium-bgobj"
+    # size = "large"
     # size = "medium-tf-idf-title_margin2"
+    # size = "medium-tf-idf-title_margin2_oneModel"
     # size = "medium-paper_margin2"
-    # size = "medium-paper_margin2_oneModel"
+
+    
 
     path = "dataserver/axcell/" + size + "/paperDict.json"
     with open(path, 'r') as f:
@@ -68,13 +71,13 @@ def main():
         path = "dataserver/axcell/" + size + "/embLabel/labeledAbst" + method + ".json"
         with open(path, 'r') as f:
             labeledAbstDict = json.load(f)
-
+    
     # アブスト全体の埋め込みをロード
     size_m = "medium"
     path = "dataserver/axcell/" + size_m + "/embedding/titleAbst" + method + ".json"
     with open(path, 'r') as f:
         abstEmb = json.load(f)
-        
+    
     """
     データの整形
     """
@@ -94,7 +97,7 @@ def main():
                 allPaperData.labelList[label].append(abstEmb[title])
             else:
                 allPaperData.labelList[label].append(labelAbst[label])
-                
+
     # 辞書をリストに変換
     allPaperData.paperList = list(allPaperData.paperDict.values())
     
@@ -157,8 +160,10 @@ def main():
         #print(row_dict)
         row_dict = dict(sorted(row_dict.items(), key=lambda x:x[1], reverse=True))
         row_rankedIndexList = list(row_dict.keys())
-        #print(row_rankedIndexList)
+        # print(row_rankedIndexList)
         tmpList = []
+        # print(row_dict)
+        # exit()
         for citeTitle in testPaperData.paperList[i]['cite']:
             tmpDict = {}
             tmpDict['rank'] = row_rankedIndexList.index(allPaperData.titleToIndex[citeTitle])
@@ -172,6 +177,14 @@ def main():
             tmpList.append(tmpDict)
         tmpResult['result'] = tmpList
         outputResult.append(tmpResult)
+        """
+        2つの手法のTop@Kを比較するため、全候補論文の順位のリストを生成
+        """
+        # tmpResult['rankList'] = []
+        # for rank, idx in enumerate(row_rankedIndexList):
+        #     if tmpResult['queryTitle'] == allPaperData.paperList[idx]["title"]:
+        #         continue
+        #     tmpResult['rankList'].append(allPaperData.paperList[idx]["title"])
 
     outputPath = 'result/' + __file__.split('/')[-1] + '-' + size  +  "-" + dt_now.strftime('%m%d%H%M') + '.json'
     with open(outputPath, 'w') as f:
@@ -186,7 +199,7 @@ def main():
     # 実行情報
     print("------- 実行条件 ------")
     print("プログラム: ", __file__.split('/')[-1])
-    print("埋め込み: ",size)
+    print("埋め込み: ",size)    
 
     # データセット情報の出力
     print('------- データセット情報 -----')
@@ -199,6 +212,9 @@ def main():
         
     qrels = genQrels(testPaperData)
     run = genRun(allPaperData, testPaperData, mergeSimMatrix)
+    
+    with open("tmpRun.json" , "w") as f:
+        json.dump(dict(run), f, indent=4)
 
     # スコア計算
     score_dict = evaluate(qrels, run, ["mrr","map@10", "map@20","recall@10","recall@20"])
@@ -258,20 +274,44 @@ def calcSimMatrixForLaveled(allPaperData: allPaperDataClass, testPaperData: test
         if vectorizer:
             testPaperVectorList = csr_matrix(testPaperVectorList)
             tmpVectorList = csr_matrix(tmpVectorList)
+        # simMatrix = euclidean_distances(testPaperVectorList, tmpVectorList)
         simMatrix = cosine_similarity(testPaperVectorList, tmpVectorList)
         
         # 本来はテキストがなかったものをNanに変換する
         # 懸念点としては、元からcosine_simが0だったものもNanに変換されてしまうこと。
         simMatrix = simMatrix*isNotNoneMatrix
         simMatrixDict[key] = np.where(simMatrix==0, np.nan, simMatrix)
-        # simMatrixDict[key] = simMatrix
 
     return simMatrixDict       
 
 def calcMergeSimMatrix(simMatrixDict, labelList):
-    ### 最大の類似度を求める
+    ### 平均
     # simMatrixDictのラベルごとの各要素で平均を取る
-    mergeSimMatrix = np.zeros(
+    meanMergeSimMatrix = np.zeros((len(simMatrixDict[labelList[0]]),len(simMatrixDict[labelList[0]][0])))
+    
+    # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
+    notNanSimMatrixDict = {} 
+    for key in simMatrixDict:
+        notNanSimMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, 1)
+
+    # nanでない要素数の合計をもとめる
+    notNanSam = sum([notNanSimMatrixDict[key] for key in notNanSimMatrixDict])
+
+    # 正規化
+    for key in simMatrixDict:
+        simMatrixDict[key] = preprocessing.scale(simMatrixDict[key], axis=1)
+
+    # ndarrayの加算の都合上、simMatrixのnanを0に変換する
+    for key in simMatrixDict:
+        simMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, simMatrixDict[key])
+    
+    # 全てのsimMatrixの要素の平均を出す
+    meanMergeSimMatrix = sum([simMatrixDict[key]
+                             for key in simMatrixDict]) / notNanSam
+    
+    ###  最大
+    # simMatrixDictのラベルごとの各要素で平均を取る
+    maxMergeSimMatrix = np.zeros(
         (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
 
     # 正規化
@@ -280,17 +320,19 @@ def calcMergeSimMatrix(simMatrixDict, labelList):
 
     # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
     for key in simMatrixDict:
-        mergeSimMatrix = np.fmax(mergeSimMatrix, simMatrixDict[key])
-
-    ### アブスト全体の類似度を取り出す
+        maxMergeSimMatrix = np.fmax(maxMergeSimMatrix, simMatrixDict[key])
+    
+    
+    ### アブスト全体
     entireSimMatrix = simMatrixDict["entire"]
     del simMatrixDict["entire"]
+    
 
-    # 全体と最大との平均を取る
-    mergeSimMatrix = (mergeSimMatrix + entireSimMatrix) / 2
-
-    return mergeSimMatrix
-
+    ### アブスト全体との平均を取る
+    meanMergeSimMatrix = (meanMergeSimMatrix + entireSimMatrix) / 2
+    # meanMergeSimMatrix = ( meanMergeSimMatrix + maxMergeSimMatrix + entireSimMatrix ) / 3
+    
+    return meanMergeSimMatrix
 
 if __name__ == "__main__":
     main()
