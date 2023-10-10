@@ -189,7 +189,7 @@ taihi
 nohup.out
 tmpRun.json
 tmpRun.json
-run-entire.py
+# run-entire.py
 run-labeled-max.py
 run-labeled-mean-max.py
 run-labeled.py
