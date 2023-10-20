@@ -20,16 +20,17 @@ from sklearn import preprocessing
 
 ※ 観点毎の類似度を正規化している
   正規化していないプログラムはnotStandarzationディレクトリにある。
-"""	
+"""
+
+
 def main():
     dt_now = datetime.datetime.now()
-    
+
     """
     引数を読み込み
     """
-    args = arg_parse_from_commandline(['method', 'meanOrMax'])
+    args = arg_parse_from_commandline(['method'])
     method = args.method
-    meanOrMax = args.meanOrMax
 
     if method != 'tf-idf' and \
             method != 'bow' and \
@@ -37,12 +38,6 @@ def main():
             method != 'SciBert' and \
             method != 'Specter':
         print("Methodの引数が間違っています")
-        exit()
-
-    if meanOrMax != "mean" and \
-        meanOrMax != "max" and \
-        meanOrMax != "mean-max":
-        print("第二引数 meanOrMax は 'mean' or 'max' or 'mean-max' で指定してください．")
         exit()
 
     """
@@ -59,13 +54,12 @@ def main():
     # size = "large"
     # size = "medium-tf-idf-title_margin2"
     # size = "medium-tf-idf-title_margin2_oneModel"
-    # size = "medium-paper_margin2"
+    # size = "medium-lstm-margin2"
+    # size = "medium-lstm"
+    # size = "medium-average_pooling"
+    size = "medium-pretrain_average_pooling"
     # size = "medium-pretrain_lstm"
-    # size = "medium-pretrain_average_pooling"
     # size = "medium-pretrain_lstm_2023_10_16"
-    
-
-    
 
     path = "dataserver/axcell/" + size + "/paperDict.json"
     with open(path, 'r') as f:
@@ -88,22 +82,13 @@ def main():
         # 扱いやすいようにアブストだけでなくタイトルもvalueで参照できるようにしておく
         for title in labeledAbstSentDict:
             labeledAbstSentDict[title]["title"] = title
-    
-    # アブスト全体の埋め込みをロード
-    size_m = "medium"
-    # size_m = "medium-pretrain_average_pooling_entire"
-    path = "dataserver/axcell/" + size_m + "/embedding/titleAbst" + method + ".json"
-    with open(path, 'r') as f:
-        abstEmb = json.load(f)
-    
+
     """
     データの整形
     """
-    labelList = ['title', 'bg', 'obj', 'method', 'res', 'entire']
-    # labelList = ['title', 'bg', 'obj', 'method', 'res']
+    labelList = ['title', 'bg', 'obj', 'method', 'res']
     # labelList = ['title', 'bg', 'method', 'res']
 
-    allPaperData.labelList['entire'] = []
     for title, paper in allPaperData.paperDict.items():
         # Vectorizerに合うようにアブストラクトのみをリストに抽出
         allPaperData.abstList.append(paper["abstract"])
@@ -111,14 +96,11 @@ def main():
         # 分類されたアブストラクトごとにリストに抽出
         labelAbst = labeledAbstDict[paper["title"]]
         for label in labelList:
-            if label == "entire":
-                allPaperData.labelList[label].append(abstEmb[title])
-            else:
-                allPaperData.labelList[label].append(labelAbst[label])
+            allPaperData.labelList[label].append(labelAbst[label])
 
     # 辞書をリストに変換
     allPaperData.paperList = list(allPaperData.paperDict.values())
-    
+
     # テスト用のクエリ論文のインデックスを抽出
     for i, paper in enumerate(allPaperData.paperList):
         if paper['test'] == 1:
@@ -127,7 +109,7 @@ def main():
             allPaperData.testDataIndex.append(len(testPaperData.paperList) - 1)
         else:
             allPaperData.testDataIndex.append(None)
-            
+
     # 予測結果の分析のため、タイトルをキーとして、indexをバリューとする辞書を生成
     for i, paper in enumerate(allPaperData.paperList):
         allPaperData.titleToIndex[paper['title']] = i
@@ -136,21 +118,24 @@ def main():
     BOW・TF-IDFを算出
     """
     # TF-IDF
-    if method == 'tf-idf': 
+    if method == 'tf-idf':
         vectorizer = TfidfVectorizer()
-        simMatrixDict = calcSimMatrixForLaveled(allPaperData, testPaperData, labelList, vectorizer=vectorizer)
-        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList, meanOrMax)                
-            
+        simMatrixDict = calcSimMatrixForLaveled(
+            allPaperData, testPaperData, labelList, vectorizer=vectorizer)
+        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList)
+
     # BOW
     elif method == 'bow':
         vectorizer = CountVectorizer()
-        simMatrixDict = calcSimMatrixForLaveled(allPaperData, testPaperData, labelList, vectorizer=vectorizer)
-        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList, meanOrMax)
+        simMatrixDict = calcSimMatrixForLaveled(
+            allPaperData, testPaperData, labelList, vectorizer=vectorizer)
+        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList)
 
     # BERT系
     elif 'Bert' in method or 'Specter' in method:
-        simMatrixDict = calcSimMatrixForLaveled(allPaperData, testPaperData, labelList)
-        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList, meanOrMax)
+        simMatrixDict = calcSimMatrixForLaveled(
+            allPaperData, testPaperData, labelList)
+        mergeSimMatrix = calcMergeSimMatrix(simMatrixDict, labelList)
 
     """
     デバッグ出力
@@ -175,8 +160,9 @@ def main():
         tmpResult['queryTitle'] = testPaperData.paperList[i]['title']
         tmpResult['queryAbstract'] = testPaperData.paperList[i]['abstract']
         row_dict = {i: row[i] for i in range(0, len(row))}
-        #print(row_dict)
-        row_dict = dict(sorted(row_dict.items(), key=lambda x:x[1], reverse=True))
+        # print(row_dict)
+        row_dict = dict(
+            sorted(row_dict.items(), key=lambda x: x[1], reverse=True))
         row_rankedIndexList = list(row_dict.keys())
         # print(row_rankedIndexList)
         tmpList = []
@@ -184,18 +170,20 @@ def main():
         # exit()
         for citeTitle in testPaperData.paperList[i]['cite']:
             tmpDict = {}
-            tmpDict['rank'] = row_rankedIndexList.index(allPaperData.titleToIndex[citeTitle])
+            tmpDict['rank'] = row_rankedIndexList.index(
+                allPaperData.titleToIndex[citeTitle])
             tmpDict['title'] = citeTitle
             tmpDict['abstract'] = allPaperData.abstList[allPaperData.titleToIndex[citeTitle]]
             tmpDict['labelScore'] = {}
             for key in simMatrixDict:
                 tmpDict['labelScore'][key] = simMatrixDict[key][i][allPaperData.titleToIndex[citeTitle]]
-            tmpDict['labelScore'] = dict(sorted(tmpDict['labelScore'].items(), key=lambda x:x[1], reverse=True))
-            #print(tmpDict['labelScore'])
+            tmpDict['labelScore'] = dict(
+                sorted(tmpDict['labelScore'].items(), key=lambda x: x[1], reverse=True))
             # 分類された文章
             tmpDict['labelSent'] = {}
             for key in tmpDict['labelScore']:
                 tmpDict['labelSent'][key] = labeledAbstSentDict[citeTitle][key]
+
             tmpList.append(tmpDict)
         tmpResult['result'] = tmpList
         outputResult.append(tmpResult)
@@ -207,11 +195,12 @@ def main():
         #     if tmpResult['queryTitle'] == allPaperData.paperList[idx]["title"]:
         #         continue
         #     tmpResult['rankList'].append(allPaperData.paperList[idx]["title"])
-
-    outputPath = 'result/' + __file__.split('/')[-1] + '-' + size  +  "-" + dt_now.strftime('%m%d%H%M') + '.json'
+    
+    outputPath = 'result/' + \
+        __file__.split('/')[-1] + '-' + size + "-" + \
+        dt_now.strftime('%m%d%H%M') + '.json'
     with open(outputPath, 'w') as f:
         json.dump(outputResult, f, indent=4)
-        
 
     """
     評価
@@ -221,8 +210,7 @@ def main():
     # 実行情報
     print("------- 実行条件 ------")
     print("プログラム: ", __file__.split('/')[-1])
-    print("埋め込み: ",size)    
-    print("手法: ", meanOrMax)
+    print("埋め込み: ", size)
 
     # データセット情報の出力
     print('------- データセット情報 -----')
@@ -232,24 +220,29 @@ def main():
     for paper in testPaperData.paperList:
         countCite += len(paper['cite'])
     print('クエリ論文の平均引用文献数: ', countCite/len(testPaperData.paperList))
-        
+
     qrels = genQrels(testPaperData)
     run = genRun(allPaperData, testPaperData, mergeSimMatrix)
-    
-    with open("tmpRun.json" , "w") as f:
+
+    with open("tmpRun.json", "w") as f:
         json.dump(dict(run), f, indent=4)
 
     # スコア計算
-    score_dict = evaluate(qrels, run, ["mrr","map@10", "map@20","recall@10","recall@20"])
-    print('{:.3f}'.format(score_dict['mrr']), '{:.3f}'.format(score_dict['map@10']), '{:.3f}'.format(score_dict['map@20']), '{:.3f}'.format(score_dict['recall@10']), '{:.3f}'.format(score_dict['recall@20']))
+    score_dict = evaluate(
+        qrels, run, ["mrr", "map@10", "map@20", "recall@10", "recall@20"])
+    print('{:.3f}'.format(score_dict['mrr']), '{:.3f}'.format(score_dict['map@10']), '{:.3f}'.format(
+        score_dict['map@20']), '{:.3f}'.format(score_dict['recall@10']), '{:.3f}'.format(score_dict['recall@20']))
+
 
 """
 Class & Methods
 """
+
+
 def calcSimMatrixForLaveled(allPaperData: allPaperDataClass, testPaperData: testPaperDataClass, labelList, vectorizer=None):
     # 背景、手法などの類似度を計算した行列を格納する辞書
-    simMatrixDict =  {v : [] for v in labelList}
-    
+    simMatrixDict = {v: [] for v in labelList}
+
     # TF-IDFやbowの計算を行う
     if vectorizer:
         # 全体の語彙の取得とTF-IDF(bow)の計算の実行、返り値はScipyのオブジェクトとなる
@@ -258,12 +251,13 @@ def calcSimMatrixForLaveled(allPaperData: allPaperDataClass, testPaperData: test
 
     for key in labelList:
         # そのラベルに分類された文章がないことで、ベクトルがNoneとなっているものを記憶しておく
-        isNotNoneMatrix = np.ones((len(testPaperData.paperList), len(allPaperData.paperList)))
+        isNotNoneMatrix = np.ones(
+            (len(testPaperData.paperList), len(allPaperData.paperList)))
         if vectorizer:
             tmpVectorList = []
             # ベクトルに変換
             for i, text in enumerate(allPaperData.labelList[key]):
-                
+
                 if text:
                     # ここで行列に変換されてしまうため[0]を参照する
                     vector = vectorizer.transform([text]).toarray().tolist()[0]
@@ -271,169 +265,84 @@ def calcSimMatrixForLaveled(allPaperData: allPaperDataClass, testPaperData: test
                     # cosine_simをまとめて計算するために、Noneではなく0(なんでもいい)を代入しておく
                     vector = [0]*len(vectorizer.get_feature_names_out())
                     # その場合のインデックスを覚えておく
-                    isNotNoneMatrix[:,i] = 0
+                    isNotNoneMatrix[:, i] = 0
                     if i in testPaperData.allDataIndex:
-                        isNotNoneMatrix[allPaperData.testDataIndex[i],:] = 0
+                        isNotNoneMatrix[allPaperData.testDataIndex[i], :] = 0
                 tmpVectorList.append(vector)
         else:
             tmpVectorList = allPaperData.labelList[key]
             for i, vector in enumerate(tmpVectorList):
                 if vector == None:
                     # cosine_simをまとめて計算するために、Noneではなく0(なんでもいい)を代入しておく
-                    tmpVectorList[i] = [0]*768 # BERTの次元数
+                    tmpVectorList[i] = [0]*768  # BERTの次元数
                     # その場合のインデックスを覚えておく
-                    isNotNoneMatrix[:,i] = 0
+                    isNotNoneMatrix[:, i] = 0
                     if i in testPaperData.allDataIndex:
-                        isNotNoneMatrix[allPaperData.testDataIndex[i],:] = 0
+                        isNotNoneMatrix[allPaperData.testDataIndex[i], :] = 0
 
         # クエリ論文のTF-IDFベクトルを抽出
         testPaperVectorList = extractTestPaperEmbeddings(
-                tmpVectorList, 
-                testPaperData.allDataIndex
-            )
-        #simMatrixDict[key] = calcSimMatrix(testPaperVectorList, tmpVectorList)
-        #print(isNoneVectorMatrix)
+            tmpVectorList,
+            testPaperData.allDataIndex
+        )
+        # simMatrixDict[key] = calcSimMatrix(testPaperVectorList, tmpVectorList)
+        # print(isNoneVectorMatrix)
         # TF-IDFやBOWの場合は疎行列となるため、csr_sparse_matrixに変換して速度を上げる
         if vectorizer:
             testPaperVectorList = csr_matrix(testPaperVectorList)
             tmpVectorList = csr_matrix(tmpVectorList)
         # simMatrix = euclidean_distances(testPaperVectorList, tmpVectorList)
         simMatrix = cosine_similarity(testPaperVectorList, tmpVectorList)
-        
+
         # 本来はテキストがなかったものをNanに変換する
         # 懸念点としては、元からcosine_simが0だったものもNanに変換されてしまうこと。
         simMatrix = simMatrix*isNotNoneMatrix
-        simMatrixDict[key] = np.where(simMatrix==0, np.nan, simMatrix)
+        simMatrixDict[key] = np.where(simMatrix == 0, np.nan, simMatrix)
+    # print(simMatrixDict['bg'])
 
-    return simMatrixDict       
+    return simMatrixDict
 
 
-def calcMergeSimMatrix(simMatrixDict, labelList, meanOrMax):
-    numMatrix = np.zeros(
+def calcMergeSimMatrix(simMatrixDict, labelList):
+    # simMatrixDictのラベルごとの各要素で平均を取る
+    mergeSimMatrix = np.zeros(
         (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
-    numCount = 0
-    
-    ### 各観点の類似度の標準化（アブスト全体も含む）
+
+    # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
+    notNanSimMatrixDict = {}
     for key in simMatrixDict:
-        simMatrixDict[key] = preprocessing.scale(simMatrixDict[key], axis=1)
+        notNanSimMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, 1)
 
-    ### アブスト全体を取り出す
-    entireSimMatrix = simMatrixDict["entire"]
-    numMatrix += entireSimMatrix
-    del simMatrixDict["entire"]
+    # nanでない要素数の合計をもとめる
+    notNanSam = sum([notNanSimMatrixDict[key] for key in notNanSimMatrixDict])
 
-    ### 平均
-    if "mean" in meanOrMax:
-        # simMatrixDictのラベルごとの各要素で平均を取る
-        meanMergeSimMatrix = np.zeros(
-            (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
-
-        # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
-        notNanSimMatrixDict = {}
-        for key in simMatrixDict:
-            notNanSimMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, 1)
-
-        # nanでない要素数の合計をもとめる
-        notNanSam = sum([notNanSimMatrixDict[key] for key in notNanSimMatrixDict])
-
-        # ndarrayの加算の都合上、simMatrixのnanを0に変換する
-        for key in simMatrixDict:
-            simMatrixDict[key] = np.where(
-                np.isnan(simMatrixDict[key]), 0, simMatrixDict[key])
-
-        # 全てのsimMatrixの要素の平均を出す
-        meanMergeSimMatrix = sum([simMatrixDict[key]
-                                for key in simMatrixDict]) / notNanSam
-        
-        numMatrix += meanMergeSimMatrix
-        numCount += 1
-
-    ### 最大
-    if "max" in meanOrMax:
-        # simMatrixDictのラベルごとの各要素で平均を取る
-        maxMergeSimMatrix = np.zeros(
-            (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
-
-        # 最大値を求める
-        for key in simMatrixDict:
-            maxMergeSimMatrix = np.fmax(maxMergeSimMatrix, simMatrixDict[key])
-
-        numMatrix += maxMergeSimMatrix
-        numCount += 1
-
-    ### アブスト全体と観点の平均・最大との平均を取る
-    return numMatrix / numCount
-
-
-
-def calcMergeSimMatrix_miss(simMatrixDict, labelList, meanOrMax):
-    """観点の平均値，最大値の計算にアブスト全体も含めて実装してしまった時の関数（実装ミス）
-    もしかするとこっちの方がスコアが高いかもしれないから残しておく
-    （原因）
-    simMatrixDictにアブスト全体（"entire"）も含めていた
-    
-    Args:
-        simMatrixDict (_type_): _description_
-        labelList (_type_): _description_
-
-    Returns:
-        _type_: _description_
-    """
-    numMatrix = np.zeros(
-        (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
-    numCount = 0
+    # print(len(simMatrixDict['bg']))
+    # print(len(simMatrixDict['bg'][0]))
+    # print(simMatrixDict['bg'])
 
     # 正規化
     for key in simMatrixDict:
         simMatrixDict[key] = preprocessing.scale(simMatrixDict[key], axis=1)
 
-    # 平均
-    if "mean" in meanOrMax:
-        # 要素がnanでなければ1、nanなら0を立てた行列をラベル毎に格納した辞書
-        notNanSimMatrixDict = {}
-        for key in simMatrixDict:
-            notNanSimMatrixDict[key] = np.where(np.isnan(simMatrixDict[key]), 0, 1)
+    # print(simMatrixDict['bg'])
 
-        # nanでない要素数の合計をもとめる
-        notNanSam = sum([notNanSimMatrixDict[key] for key in notNanSimMatrixDict])
+    # ndarrayの加算の都合上、simMatrixのnanを0に変換する
+    for key in simMatrixDict:
+        simMatrixDict[key] = np.where(
+            np.isnan(simMatrixDict[key]), 0, simMatrixDict[key])
 
-        # ndarrayの加算の都合上、simMatrixのnanを0に変換する
-        for key in simMatrixDict:
-            simMatrixDict[key] = np.where(
-                np.isnan(simMatrixDict[key]), 0, simMatrixDict[key])
+    # 全てのsimMatrixの要素の平均を出す
+    # 手法1. 平均を出す
+    mergeSimMatrix = sum([simMatrixDict[key]
+                         for key in simMatrixDict]) / notNanSam
+    # np.set_printoptions(threshold=np.inf)
+    # print(notNanSam)
+    # 手法2. 累乗してから足し合わせて平均を出す
+    # mergeSimMatrix = sum([simMatrixDict[key]**5 for key in simMatrixDict]) / notNanSam
+    # mergeSimMatrix = sum([simMatrixDict[key] for key in simMatrixDict]) / notNanSam
 
-        # 全てのsimMatrixの要素の平均を出す
-        meanMergeSimMatrix = sum([simMatrixDict[key]
-                                for key in simMatrixDict]) / notNanSam
-        
-        numMatrix += meanMergeSimMatrix
-        numCount += 1
+    return mergeSimMatrix
 
-    # 最大
-    if "max" in meanOrMax:
-        # simMatrixDictのラベルごとの各要素で平均を取る
-        maxMergeSimMatrix = np.zeros(
-            (len(simMatrixDict[labelList[0]]), len(simMatrixDict[labelList[0]][0])))
-
-        # 正規化
-        for key in simMatrixDict:
-            simMatrixDict[key] = preprocessing.scale(simMatrixDict[key], axis=1)
-
-        # 最大
-        for key in simMatrixDict:
-            maxMergeSimMatrix = np.fmax(maxMergeSimMatrix, simMatrixDict[key])
-
-        numMatrix += maxMergeSimMatrix
-        numCount += 1
-
-    # アブスト全体
-    entireSimMatrix = simMatrixDict["entire"]
-    del simMatrixDict["entire"]
-    numMatrix += entireSimMatrix
-    numCount += 1
-
-    # アブスト全体と観点の最大との平均を取る
-    return numMatrix / numCount
 
 if __name__ == "__main__":
     main()

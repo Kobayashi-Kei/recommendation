@@ -48,6 +48,8 @@ def main():
     """
     size = "medium"
     size = 'medium-pretrain_average_pooling_entire'
+    size = 'medium-pretrain_lstm_entire'
+    size = 'medium-pretrain_lstm_2023_10_16'
 
     path = "dataserver/axcell/" + size + "/paperDict.json"
     with open(path, 'r') as f:
